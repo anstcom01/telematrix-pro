@@ -55,6 +55,21 @@ class Database:
                 created_at TEXT NOT NULL
             )""",
             
+            """CREATE TABLE IF NOT EXISTS proxy_settings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id INTEGER NOT NULL UNIQUE,
+                proxy_type TEXT NOT NULL,
+                host TEXT NOT NULL,
+                port INTEGER NOT NULL,
+                username TEXT,
+                password TEXT,
+                rotation_enabled INTEGER DEFAULT 0,
+                rotation_interval INTEGER DEFAULT 0,
+                last_used TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (account_id) REFERENCES accounts(id)
+            )""",
+            
             """CREATE TABLE IF NOT EXISTS parsed_users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
