@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, 
     QTableWidgetItem, QPushButton, QDialog, QFormLayout,
     QLineEdit, QMessageBox, QDialogButtonBox, QComboBox,
-    QLabel, QCheckBox, QHeaderView, QFileDialog
+    QLabel, QCheckBox, QHeaderView, QFileDialog, QApplication
 )
 from PyQt6.QtCore import Qt
 
@@ -73,8 +73,12 @@ class AccountsWidget(QWidget):
         first_row.addWidget(self.manager_button)
         
         self.check_button = QPushButton("✓ Проверить")
-        self.check_button.clicked.connect(self.show_placeholder)
+        self.check_button.clicked.connect(self.check_selected_account)
         first_row.addWidget(self.check_button)
+        
+        self.authenticate_button = QPushButton("🔐 Авторизовать")
+        self.authenticate_button.clicked.connect(self.authenticate_selected_account)
+        first_row.addWidget(self.authenticate_button)
         
         self.check_no_spam_button = QPushButton("✓ Без @Spam")
         self.check_no_spam_button.clicked.connect(self.show_placeholder)
@@ -547,6 +551,84 @@ class AccountsWidget(QWidget):
                 "Ошибка",
                 error_msg
             )
+    
+    def check_selected_account(self):
+        """Проверяет выбранный аккаунт через AsyncManager"""
+        # Получаем выбранную строку
+        current_row = self.table.currentRow()
+        
+        if current_row < 0:
+            QMessageBox.warning(
+                self,
+                "Ошибка",
+                "Выберите аккаунт для проверки"
+            )
+            return
+        
+        # Получаем телефон из таблицы (колонка 7)
+        phone_item = self.table.item(current_row, 7)
+        if not phone_item:
+            QMessageBox.warning(self, "Ошибка", "Не удалось получить данные аккаунта")
+            return
+        
+        phone = phone_item.text()
+        
+        # Находим главное окно приложения
+        main_window = None
+        for widget in QApplication.topLevelWidgets():
+            if hasattr(widget, 'check_account_async'):
+                main_window = widget
+                break
+        
+        if main_window:
+            # Вызываем async метод проверки
+            main_window.check_account_async(phone)
+        else:
+            QMessageBox.warning(
+                self,
+                "Ошибка",
+                "Не удалось найти главное окно приложения"
+            )
+            logger.error("Не удалось найти главное окно для проверки аккаунта")
+    
+    def authenticate_selected_account(self):
+        """Авторизует выбранный аккаунт через AsyncManager"""
+        # Получаем выбранную строку
+        current_row = self.table.currentRow()
+        
+        if current_row < 0:
+            QMessageBox.warning(
+                self,
+                "Ошибка",
+                "Выберите аккаунт для авторизации"
+            )
+            return
+        
+        # Получаем телефон из таблицы (колонка 7)
+        phone_item = self.table.item(current_row, 7)
+        if not phone_item:
+            QMessageBox.warning(self, "Ошибка", "Не удалось получить данные аккаунта")
+            return
+        
+        phone = phone_item.text()
+        
+        # Находим главное окно приложения
+        main_window = None
+        for widget in QApplication.topLevelWidgets():
+            if hasattr(widget, 'authenticate_account'):
+                main_window = widget
+                break
+        
+        if main_window:
+            # Вызываем async метод авторизации
+            main_window.authenticate_account(phone)
+        else:
+            QMessageBox.warning(
+                self,
+                "Ошибка",
+                "Не удалось найти главное окно приложения"
+            )
+            logger.error("Не удалось найти главное окно для авторизации аккаунта")
     
     def show_placeholder(self):
         """Показывает сообщение о том, что функция в разработке"""

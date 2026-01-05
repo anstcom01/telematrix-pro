@@ -5,15 +5,19 @@ Desktop приложение на PyQt6 для работы с Telegram чере
 
 import sys
 import logging
+import asyncio
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QMenuBar, QStatusBar, 
-    QMessageBox, QMenu, QTabWidget, QLabel, QVBoxLayout, QWidget
+    QMessageBox, QMenu, QTabWidget, QLabel, QVBoxLayout, QWidget,
+    QInputDialog
 )
 from PyQt6.QtCore import Qt
+import qasync
 
 from src.core.database import Database
 from src.core.account_manager import AccountManager
 from src.core.plugin_system import PluginSystem
+from src.core.async_manager import AsyncManager
 
 # Настройка логирования
 logging.basicConfig(
@@ -32,6 +36,7 @@ class MainApp(QMainWindow):
         self.database = None
         self.account_manager = None
         self.plugin_system = None
+        self.async_manager = None
         
         self.init_ui()
         self.init_core()
@@ -102,6 +107,11 @@ class MainApp(QMainWindow):
             logger.info("Создание PluginSystem...")
             self.plugin_system = PluginSystem(self.account_manager, self.database)
             logger.info("✅ PluginSystem создан")
+            
+            # Создание менеджера асинхронных операций
+            logger.info("Создание AsyncManager...")
+            self.async_manager = AsyncManager(self.account_manager, self.database)
+            logger.info("✅ AsyncManager создан")
             
             # Загрузка плагинов
             logger.info("Загрузка плагинов...")
@@ -196,14 +206,209 @@ class MainApp(QMainWindow):
         window.moveCenter(center_point)
         # Устанавливаем позицию окна
         self.move(window.topLeft())
+    
+    @qasync.asyncSlot(str)
+    async def check_account_async(self, phone: str):
+        """
+        Асинхронная проверка аккаунта
+        
+        Args:
+            phone: Номер телефона аккаунта для проверки
+        """
+        try:
+            logger.info(f"Начало проверки аккаунта: {phone}")
+            
+            # Обновляем статус-бар
+            self.statusBar.showMessage(f"Проверка аккаунта {phone}...")
+            
+            # Выполняем проверку через AsyncManager
+            account_info = await self.async_manager.check_account(phone)
+            
+            # Формируем сообщение с результатом
+            if account_info:
+                message = f"✅ Аккаунт проверен успешно!\n\n"
+                message += f"ID: {account_info.get('id', 'N/A')}\n"
+                message += f"Username: @{account_info.get('username', 'N/A')}\n"
+                message += f"Имя: {account_info.get('first_name', 'N/A')}\n"
+                if account_info.get('last_name'):
+                    message += f"Фамилия: {account_info.get('last_name')}\n"
+                message += f"Телефон: {account_info.get('phone', 'N/A')}\n"
+                message += f"Бот: {'Да' if account_info.get('is_bot') else 'Нет'}\n"
+                message += f"Premium: {'Да' if account_info.get('is_premium') else 'Нет'}"
+                
+                QMessageBox.information(
+                    self,
+                    "Проверка аккаунта",
+                    message
+                )
+                logger.info(f"Проверка аккаунта {phone} завершена успешно")
+            else:
+                QMessageBox.warning(
+                    self,
+                    "Проверка аккаунта",
+                    f"Не удалось проверить аккаунт {phone}.\nВозможно, аккаунт не авторизован или произошла ошибка."
+                )
+                logger.warning(f"Проверка аккаунта {phone} не удалась")
+            
+            # Обновляем статус-бар
+            self.statusBar.showMessage("Готов")
+            
+        except Exception as e:
+            error_msg = f"Ошибка проверки аккаунта {phone}: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            
+            QMessageBox.critical(
+                self,
+                "Ошибка",
+                error_msg
+            )
+            
+            # Обновляем статус-бар
+            self.statusBar.showMessage("Ошибка проверки")
+    
+    @qasync.asyncSlot(str)
+    async def authenticate_account(self, phone: str):
+        """
+        Асинхронная авторизация аккаунта через Telethon
+        
+        Args:
+            phone: Номер телефона аккаунта для авторизации
+        """
+        try:
+            logger.info(f"Начало авторизации аккаунта: {phone}")
+            
+            # Получаем данные аккаунта
+            account_data = self.account_manager.get_account_by_phone(phone)
+            if not account_data:
+                QMessageBox.warning(
+                    self,
+                    "Ошибка",
+                    f"Аккаунт {phone} не найден в базе данных"
+                )
+                return
+            
+            # Проверяем наличие session_string
+            if account_data.get('session_string'):
+                reply = QMessageBox.question(
+                    self,
+                    "Аккаунт уже авторизован",
+                    f"Аккаунт {phone} уже имеет сохранённую сессию.\nПереавторизовать?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No
+                )
+                if reply == QMessageBox.StandardButton.No:
+                    return
+            
+            # Обновляем статус-бар
+            self.statusBar.showMessage(f"Авторизация аккаунта {phone}...")
+            
+            # Создаём клиента
+            client = self.async_manager.create_client(phone)
+            if not client:
+                QMessageBox.critical(
+                    self,
+                    "Ошибка",
+                    f"Не удалось создать клиент для {phone}"
+                )
+                return
+            
+            # Функция для получения кода через диалог
+            def get_code_from_dialog(phone_number: str) -> str:
+                code, ok = QInputDialog.getText(
+                    self,
+                    "Код подтверждения",
+                    f"Введите код подтверждения для {phone_number}:",
+                    echo=QInputDialog.EchoMode.Normal
+                )
+                if ok and code:
+                    return code.strip()
+                return ""
+            
+            # Функция для получения пароля 2FA через диалог
+            def get_password_from_dialog(phone_number: str) -> str:
+                password, ok = QInputDialog.getText(
+                    self,
+                    "Пароль 2FA",
+                    f"Введите пароль 2FA для {phone_number}:",
+                    echo=QInputDialog.EchoMode.Password
+                )
+                if ok and password:
+                    return password.strip()
+                return ""
+            
+            # Запускаем авторизацию
+            success = await self.async_manager.start_client(
+                client,
+                phone,
+                code_callback=get_code_from_dialog,
+                password_callback=get_password_from_dialog
+            )
+            
+            # Отключаем клиента
+            await self.async_manager.disconnect(client)
+            
+            if success:
+                QMessageBox.information(
+                    self,
+                    "Успех",
+                    f"Аккаунт {phone} успешно авторизован!\nСессия сохранена в базе данных."
+                )
+                logger.info(f"Аккаунт {phone} успешно авторизован")
+                
+                # Обновляем таблицу в плагине Аккаунты, если он загружен
+                self._refresh_accounts_plugin()
+            else:
+                QMessageBox.warning(
+                    self,
+                    "Ошибка авторизации",
+                    f"Не удалось авторизовать аккаунт {phone}.\nПроверьте код подтверждения и попробуйте снова."
+                )
+                logger.warning(f"Авторизация аккаунта {phone} не удалась")
+            
+            # Обновляем статус-бар
+            self.statusBar.showMessage("Готов")
+            
+        except Exception as e:
+            error_msg = f"Ошибка авторизации аккаунта {phone}: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            
+            QMessageBox.critical(
+                self,
+                "Ошибка",
+                error_msg
+            )
+            
+            # Обновляем статус-бар
+            self.statusBar.showMessage("Ошибка авторизации")
+    
+    def _refresh_accounts_plugin(self):
+        """Обновляет таблицу аккаунтов в плагине Аккаунты"""
+        try:
+            # Находим виджет плагина Аккаунты
+            for i in range(self.tabs.count()):
+                widget = self.tabs.widget(i)
+                if widget and hasattr(widget, 'load_accounts'):
+                    widget.load_accounts()
+                    logger.debug("Таблица аккаунтов обновлена")
+                    break
+        except Exception as e:
+            logger.error(f"Ошибка обновления таблицы аккаунтов: {e}", exc_info=True)
 
 
 def main():
     """Точка входа в приложение"""
     app = QApplication(sys.argv)
+    
+    # Настройка async event loop для PyQt6
+    loop = qasync.QEventLoop(app)
+    asyncio.set_event_loop(loop)
+    
     window = MainApp()
     window.show()
-    sys.exit(app.exec())
+    
+    # Запускаем event loop
+    with loop:
+        sys.exit(loop.run_forever())
 
 
 if __name__ == "__main__":
