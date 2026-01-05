@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.pyo
+*.db
+.vscode/
+*.db-journal
+test_*.db
+.DS_Store
+venv/
+env/
+.cursorrules
+
